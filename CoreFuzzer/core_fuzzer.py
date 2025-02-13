@@ -207,7 +207,7 @@ def check_smf():
     path.output_symbols = ["authenticationRequest",
                            "securityModeCommand",
                            "registrationAccept",
-                           "null_action",
+                           "configurationUpdateCommand",
                            "pduSessionEstablishmentAccept"]
     out_list = []
     for i in range(len(path.input_symbols) - 1):
@@ -357,6 +357,7 @@ if __name__ == '__main__':
                         curr_state.addEnergy(1)
                         msg_add_energy(ins_msg, 1)
                     # probe AMF
+                    print("send probe to AMF")
                     startUE2()
                     time.sleep(0.1)
                     connectUE2()

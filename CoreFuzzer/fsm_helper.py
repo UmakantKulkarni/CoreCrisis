@@ -126,7 +126,7 @@ def get_all_paths(fsm: FSM, dst_state: State):
             input, output = get_trace_from_path(fsm, path)
             dst_state.add_path(Path(path, input, output))
     
-    for path in dst_state.paths:
-        print("path:", path.path_states)
-        print("input:", path.input_symbols)
-        print("output:", path.output_symbols)
+    # for path in dst_state.paths:
+    #     print("path:", path.path_states)
+    #     print("input:", path.input_symbols)
+    #     print("output:", path.output_symbols)

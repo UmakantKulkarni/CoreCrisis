@@ -1,7 +1,6 @@
 import json
 from objects.oracle import Oracle
 from objects.power_schedule import Seed
-from fsm_helper import get_trace_from_path
 
 # path class in state
 class Path:
@@ -103,10 +102,11 @@ class FSM:
         return state_names
     
     def refresh_paths(self):
+        from fsm_helper import get_trace_from_path
         for state in self.states:
             for path in state.paths:
                 path.input_symbols, path.output_symbols = get_trace_from_path(self, path.path_states)
-                print("path.input_symbols:", path.input_symbols)
+                # print("path.input_symbols:", path.input_symbols)
     
     def to_json(self):
         return json.dumps(self, default=lambda o: o.__dict__, indent=4)

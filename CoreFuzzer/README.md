@@ -2,6 +2,7 @@
 To build the docker file, execute the following commands:
 Copy ``UERANSIM_CoreTesting`` inside this folder
 ```shell
+cp -r ../UERANSIM_CoreTesting/ .
 docker image build -t corefuzzer:sm .
 ```
 Afterwards, you can obtain an interactive shell to a docker environment with 

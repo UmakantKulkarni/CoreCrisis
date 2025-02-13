@@ -23,17 +23,8 @@ import java.util.Properties;
  * Configuration class used for learning parameters
  */
 public class LearningConfig {
-    static int TYPE_SMARTCARD = 1;
-    static int TYPE_SOCKET = 2;
-    static int TYPE_TLS = 3;
-    static int TYPE_CORE = 4;
-    static int TYPE_LTEUESIM = 5;
-
-    static int TYPE_LTEUE = 6;
     public String device = null;
-    public String db_table_name = null;
     protected Properties properties;
-    int type = TYPE_SMARTCARD;
     String output_dir = "output";
     String learning_algorithm = "lstar";
     String eqtest = "randomwords";
@@ -47,7 +38,6 @@ public class LearningConfig {
     boolean log_executor_active = false;
     boolean resume_learning_active = false;
     String path_to_resuming_log = "";
-    String path_to_plain_replay = "";
 
     String final_symbol = "";
 
@@ -76,19 +66,6 @@ public class LearningConfig {
         if (properties.getProperty("output_dir") != null)
             output_dir = properties.getProperty("output_dir");
 
-        if (properties.getProperty("type") != null) {
-            if (properties.getProperty("type").equalsIgnoreCase("smartcard"))
-                type = TYPE_SMARTCARD;
-            else if (properties.getProperty("type").equalsIgnoreCase("socket"))
-                type = TYPE_SOCKET;
-            else if (properties.getProperty("type").equalsIgnoreCase("tls"))
-                type = TYPE_TLS;
-            else if (properties.getProperty("type").equalsIgnoreCase("core"))
-                type = TYPE_CORE;
-            else if (properties.getProperty("type").equalsIgnoreCase("lteue"))
-                type = TYPE_LTEUE;
-        }
-
         if (properties.getProperty("learning_algorithm").equalsIgnoreCase("lstar") || properties.getProperty("learning_algorithm").equalsIgnoreCase("dhc") || properties.getProperty("learning_algorithm").equalsIgnoreCase("kv") || properties.getProperty("learning_algorithm").equalsIgnoreCase("ttt") || properties.getProperty("learning_algorithm").equalsIgnoreCase("mp") || properties.getProperty("learning_algorithm").equalsIgnoreCase("rs"))
             learning_algorithm = properties.getProperty("learning_algorithm").toLowerCase();
 
@@ -101,11 +78,8 @@ public class LearningConfig {
         if (properties.getProperty("min_length") != null)
             min_length = Integer.parseInt(properties.getProperty("min_length"));
 
-
         if (properties.getProperty("device") != null)
             device = properties.getProperty("device");
-        if (properties.getProperty("db_table_name") != null)
-            db_table_name = properties.getProperty("db_table_name");
         if (properties.getProperty("max_length") != null)
             max_length = Integer.parseInt(properties.getProperty("max_length"));
 

@@ -25,6 +25,9 @@ public class CoreConfig extends LearningConfig {
     public String hostname;
     public String ue_controller_ip_address;
     public int ue_port;
+    public String ueransim_path;
+    public String core_path;
+    public String root_password;
 
     public boolean combine_query;
     public String delimiter_input;
@@ -68,6 +71,12 @@ public class CoreConfig extends LearningConfig {
             delimiter_output = properties.getProperty("delimiter_output");
         else
             delimiter_output = ";";
+        
+        if (properties.getProperty("ueransim_path") != null)
+            ueransim_path = properties.getProperty("ueransim_path");
+        if (properties.getProperty("core_path") != null)
+            core_path = properties.getProperty("core_path");
+        if (properties.getProperty("root_password") != null)
+            root_password = properties.getProperty("root_password");
     }
-
 }

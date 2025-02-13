@@ -22,7 +22,7 @@ public class LearningResumer {
         try {
             Class.forName("org.sqlite.JDBC");
             myConn = DriverManager.getConnection(url);
-            config = new LearningConfig("lteue.properties");
+            config = new LearningConfig("core.properties");
         } catch (Exception e) {
             System.out.println("DB Connection Error!");
             e.printStackTrace();

@@ -1,5 +1,6 @@
 package org.example.corelearner.devices;
 
+import org.example.corelearner.core.CoreConfig;
 import org.example.corelearner.core.CoreSUL;
 
 import java.io.IOException;
@@ -19,24 +20,24 @@ public class Open5GSSUL extends DeviceSUL {
     public void pre() {
         System.out.println("---- Starting RESET ----");
         try {
-            runProcess(false, "UERANSIM_PATH/build/nr-cli UERANSIM-gnb-999-70-1 --exec \"ue-release 1\"");
+            runProcess(false, CoreSUL.config.ueransim_path + "/build/nr-cli UERANSIM-gnb-999-70-1 --exec \"ue-release 1\"");
             sleep(250);
             kill_ue();
-            sleep(200);
-            kill_eNodeb();
-            sleep(300);
+            sleep(500);
+            kill_gNodeb();
+            sleep(500);
             if (IMSI_OFFSET >= 20)
             {
                 kill_core();
                 sleep(1000);
                 start_core();
-                sleep(3500);
+                sleep(5000);
                 IMSI_OFFSET = 0;
             }
-            start_eNodeB();
-            sleep(200);
+            start_gNodeB();
+            sleep(500);
             start_ue(IMSI_OFFSET);
-            sleep(300);
+            sleep(500);
             IMSI_OFFSET++;
         } catch (Exception e) {
             System.out.println("pre sleep error!");
@@ -76,7 +77,7 @@ public class Open5GSSUL extends DeviceSUL {
                 coreSUL.ue_out.write(symbol);
                 coreSUL.ue_out.flush();
             } else if (symbol.startsWith("serviceRequest")) {
-                runProcess(false, "UERANSIM_PATH/build/nr-cli UERANSIM-gnb-999-70-1 --exec \"ue-release 1\"");
+                runProcess(false, config.ueransim_path + "/build/nr-cli UERANSIM-gnb-999-70-1 --exec \"ue-release 1\"");
                 sleep(500);
                 System.out.println("Log executor: sending serviceRequest.");
                 coreSUL.ue_out.write(symbol);

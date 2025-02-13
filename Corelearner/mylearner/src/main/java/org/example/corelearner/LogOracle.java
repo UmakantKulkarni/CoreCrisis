@@ -24,7 +24,6 @@ import net.automatalib.words.Word;
 import net.automatalib.words.WordBuilder;
 import org.example.corelearner.core.CoreSUL;
 import org.example.corelearner.db.Cache;
-import org.example.corelearner.tgbot.NotificationBot;
 
 import javax.annotation.ParametersAreNonnullByDefault;
 import java.io.*;
@@ -57,7 +56,7 @@ public class LogOracle<I, D> implements MealyMembershipOracle<I, D> {
                 writer1.close();
             }
             try {
-                this.config = new LearningConfig("lteue.properties");
+                this.config = new LearningConfig("core.properties");
             } catch (IOException e) {
                 e.printStackTrace();
             }

@@ -1,6 +1,5 @@
 from pymongo.mongo_client import MongoClient
 from dotenv import dotenv_values
-from objects import Seed, PowerSchedule
 import time
 
 config = dotenv_values(".env")
@@ -48,17 +47,6 @@ def check_seed_msg(state: str):
     else:
         return False
 
-def get_insteresting_msg(state: str):
-    msg_list = col.find(filter={"state": state, "is_interesting": True})
-    msgs = []
-    for msg in msg_list:
-        msgs.append(BaseMsg(msg.get("_id"), msg.get("mutate_count"), msg.get("energy")))
-    ps = PowerSchedule()
-    ps.adjustEnergy(msgs)
-    seed = ps.choose(msgs)
-    return col.find_one_and_update(filter={"_id": seed.id},
-                                   update={"$inc": {"mutate_count": 1}})
-
 def get_msg_by_id(id: str):
     return col.find_one(filter={"_id": id})
     
@@ -96,10 +84,3 @@ def check_new_violation(state: str, send_type: str, ret_type: str, sht: int, sec
         return False
     else:
         return True
-    
-class BaseMsg(Seed):
-    def __init__(self, id: str, count: int, energy: float):
-        super().__init__()
-        self.id = id
-        self.count = count
-        self.energy = energy

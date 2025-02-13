@@ -85,15 +85,10 @@ public class Learner {
 
         LearnLogger log = LearnLogger.getLogger(Learner.class.getSimpleName());
 
-        // Check the type of learning we want to do and create corresponding configuration and SUL
-        if (config.type == LearningConfig.TYPE_CORE) {
-            log.info("Using Core SUL");
+        log.info("Using Core SUL");
 
-            // Create the TLS SUL
-            sul = new CoreSUL(new CoreConfig(config));
-            alphabet = ((CoreSUL) sul).getAlphabet();
-
-        }
+        sul = new CoreSUL(new CoreConfig(config));
+        alphabet = ((CoreSUL) sul).getAlphabet();
 
         loadLearningAlgorithm(config.learning_algorithm, alphabet, sul);
         loadEquivalenceAlgorithm(config.eqtest, alphabet, sul);
@@ -111,7 +106,6 @@ public class Learner {
                     List<String> split_line = Arrays.asList(line.split("\\s+"));
                     StoredCEs.add(split_line);
                     WordCEs.add(generateCEWord(split_line));
-                    System.out.println("WordCE generated");
                 }
             }
         } catch (Exception e) {
@@ -239,7 +233,8 @@ public class Learner {
                 break;
 
             case "randomwords":
-                equivalenceAlgorithm = new MealyRandomWordsEQOracle<String, String>(statsCachedEqOracle, config.min_length, config.max_length, config.nr_queries, new Random(config.seed));
+                equivalenceAlgorithm = new MealyRandomWordsEQOracle<String, String>(statsCachedEqOracle,
+                        config.min_length, config.max_length, config.nr_queries, new Random(config.seed));
                 break;
 
             default:
@@ -305,7 +300,7 @@ public class Learner {
                 try {
                     learningAlgorithm.refineHypothesis(counterExample);
                 } catch (Exception e) {
-                    print(e.toString());
+                    System.out.print(e.toString());
                     System.exit(1);
                 }
                 SimpleProfiler.stop("Learning");

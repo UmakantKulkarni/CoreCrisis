@@ -16,7 +16,7 @@ public class Cache {
 
     public Cache(String cache_log) {
         try {
-            config = new LearningConfig("lteue.properties");
+            config = new LearningConfig("core.properties");
         } catch (Exception e) {
             System.out.println("Howcome!");
         }
@@ -40,7 +40,7 @@ public class Cache {
         if (command == null) {
             return null;
         }
-        String Myquery = "select * from queryNew_" + config.db_table_name + " where command = ?";
+        String Myquery = "select * from queryNew_" + config.device + " where command = ?";
 
         try {
             assert myConn != null;
@@ -53,7 +53,7 @@ public class Cache {
                 preparedstatement.close();
                 return saved_query;
             } else {
-                Myquery = "select * from query_" + config.db_table_name + " where command = ?";
+                Myquery = "select * from query_" + config.device + " where command = ?";
                 preparedstatement = myConn.prepareStatement(Myquery);
                 preparedstatement.setString(1, command);
                 System.out.println("***** Search Command Old = " + command + " *****");

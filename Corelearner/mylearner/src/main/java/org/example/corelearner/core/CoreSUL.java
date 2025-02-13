@@ -21,7 +21,6 @@ import net.automatalib.words.impl.SimpleAlphabet;
 import org.example.corelearner.StateLearnerSUL;
 import org.example.corelearner.devices.DeviceSUL;
 import org.example.corelearner.devices.DeviceSULFactory;
-import org.example.corelearner.tgbot.NotificationBot;
 
 import java.io.*;
 import java.net.Socket;
@@ -42,13 +41,11 @@ public class CoreSUL implements StateLearnerSUL<String, String> {
     public BufferedWriter ue_out;
     public BufferedReader ue_in;
     public SimpleAlphabet<String> alphabet;
-    CoreConfig config;
-
-    //
+    public static CoreConfig config;
     public static int IMSI_OFFSET = 0;
 
     public CoreSUL(CoreConfig config) {
-        this.config = config;
+            CoreSUL.config = config;
         alphabet = new SimpleAlphabet<String>(Arrays.asList(config.alphabet.split(" ")));
 
         System.out.println("Starting Core & gNodeB & UE");
@@ -64,32 +61,32 @@ public class CoreSUL implements StateLearnerSUL<String, String> {
         }
     }
 
-    public static void start_eNodeB() {
-        runProcess(false, "echo \"PASSWORD\"  | sudo -S UERANSIM_PATH/build/nr-gnb -c UERANSIM_PATH/config/open5gs-gnb.yaml > ./gnb.log");
+    public static void start_gNodeB() {
+        runProcess(false, "echo \"" + config.root_password + "\"  | sudo -S " + config.ueransim_path + "/build/nr-gnb -c " + config.ueransim_path + "/config/open5gs-gnb.yaml > ./gnb.log");
 
     }
 
     public static void start_core() {
-        runProcess(false, "echo \"PASSWORD\" | sudo -S ./open5gs/start_core.sh");
+        runProcess(false, "echo \"" + config.root_password + "\" | sudo -S ./scripts/start_core.sh > core.log");
     }
 
     public static void start_ue(int offset) {
         if (offset < 9)
-            runProcess(false, "echo \"PASSWORD\" | sudo -S UERANSIM_PATH/build/nr-ue -c UERANSIM_PATH/config/open5gs-ue.yaml -i imsi-99970000000000" + (1 + offset) + "> ./ue.log");
+            runProcess(false, "echo \"" + config.root_password + "\" | sudo -S " + config.ueransim_path + "/build/nr-ue -c " + config.ueransim_path + "/config/open5gs-ue.yaml -i imsi-99970000000000" + (1 + offset) + "> ./ue.log");
         else
-            runProcess(false, "echo \"PASSWORD\" | sudo -S UERANSIM_PATH/build/nr-ue -c UERANSIM_PATH/config/open5gs-ue.yaml -i imsi-9997000000000" + (1 + offset) + "> ./ue.log");
+            runProcess(false, "echo \"" + config.root_password + "\" | sudo -S " + config.ueransim_path + "/build/nr-ue -c " + config.ueransim_path + "/config/open5gs-ue.yaml -i imsi-9997000000000" + (1 + offset) + "> ./ue.log");
     }
 
-    public static void kill_eNodeb() {
-        runProcess(false, "echo \"PASSWORD\" | sudo -S ./kill_gnb.sh");
+    public static void kill_gNodeb() {
+        runProcess(false, "echo \"" + config.root_password + "\" | sudo -S ./scripts/kill_gnb.sh");
     }
 
     public static void kill_core() {
-        runProcess(false, "echo \"PASSWORD\" | sudo -S ./open5gs/kill_core.sh");
+        runProcess(false, "echo \"" + config.root_password + "\" | sudo -S ./scripts/kill_core.sh");
     }
 
     public static void kill_ue() {
-        runProcess(false, "echo \"PASSWORD\" | sudo -S ./kill_ue.sh");
+        runProcess(false, "echo \"" + config.root_password + "\" | sudo -S ./scripts/kill_ue.sh");
     }
 
     public static void runProcess(boolean isWin, String... command) {
@@ -170,14 +167,14 @@ public class CoreSUL implements StateLearnerSUL<String, String> {
     public void start_core_enb_ue() {
         // kill and start the processes
         try {
-            kill_eNodeb();
+            kill_gNodeb();
             kill_ue();
             sleep(500);
             kill_core();
             sleep(500);
             start_core();
             sleep(5000);
-            start_eNodeB();
+            start_gNodeB();
             sleep(500);
             start_ue(0);
             sleep(500);
@@ -291,7 +288,5 @@ public class CoreSUL implements StateLearnerSUL<String, String> {
         }
 
         System.out.println(nameOfProcess + " has started...");
-    }
-        return final_result;
     }
 }
