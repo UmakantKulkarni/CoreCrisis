@@ -12,5 +12,4 @@ run.pid
 savedFSM.json*
 
 # Evaluation
-eval/aflnet/
 eval/out/
