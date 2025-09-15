@@ -1,7 +1,22 @@
 #!/usr/bin/env python3
 # Run queries on Core
 
-import os, time, socket, string, json, atexit
+import argparse
+import itertools
+import os
+import time
+import socket
+import string
+import json
+import atexit
+from pathlib import Path
+from typing import Dict, Iterable, List
+import builtins
+
+try:
+    import yaml  # type: ignore
+except ImportError:
+    yaml = None
 from db_helper import *
 from fsm_helper import *
 from setup_helper import *
@@ -23,8 +38,10 @@ def exit_handler(fsm: FSM, fsm_sm: FSM):
 
 
 # restart Core or release UE context
-def reset(full: bool):   
+def reset(full: bool):
+    setFuzzCounter(current_cycle_label)
     if full:
+        reset_cycle_counter()
         print("start full reset")
         # restart Core
         fsm.refresh_paths()
@@ -43,6 +60,7 @@ def reset(full: bool):
         setOffset(getOffset() + 1)
         return
     elif getOffset() > MAX_IMSI_OFFSET:
+        reset_cycle_counter()
         print("start full reset")
         # restart Core
         killCore()
@@ -117,28 +135,31 @@ def sendSymbol(symbol: string):
         msg_out = "null_action"
     return msg_out
 
-symbols_enabled = [
-                   "registrationRequest", 
-                   "registrationComplete",
-                   "deregistrationRequest", 
-                   "serviceRequest", 
-                   "securityModeReject",
-                   "authenticationResponse",
-                   "authenticationFailure",
-                   "deregistrationAccept",
-                   "securityModeComplete",
-                   "identityResponse",
-                   "configurationUpdateComplete",
-                   "gmmStatus",
-                   "ulNasTransport",
-                   "PDUSessionEstablishmentRequest",
-                   "PDUSessionAuthenticationComplete",
-                   "PDUSessionModificationRequest",
-                   "PDUSessionModificationComplete",
-                   "PDUSessionModificationCommandReject",
-                   "PDUSessionReleaseRequest",
-                   "PDUSessionReleaseComplete",
-                   "gsmStatus"]
+ALL_SYMBOLS = [
+    "registrationRequest",
+    "registrationComplete",
+    "deregistrationRequest",
+    "serviceRequest",
+    "securityModeReject",
+    "authenticationResponse",
+    "authenticationFailure",
+    "deregistrationAccept",
+    "securityModeComplete",
+    "identityResponse",
+    "configurationUpdateComplete",
+    "gmmStatus",
+    "ulNasTransport",
+    "PDUSessionEstablishmentRequest",
+    "PDUSessionAuthenticationComplete",
+    "PDUSessionModificationRequest",
+    "PDUSessionModificationComplete",
+    "PDUSessionModificationCommandReject",
+    "PDUSessionReleaseRequest",
+    "PDUSessionReleaseComplete",
+    "gsmStatus",
+]
+
+symbols_enabled: List[str] = ALL_SYMBOLS.copy()
 
 symbols_fsm = ["registrationRequest", 
                "registrationRequestGUTI", 
@@ -161,6 +182,165 @@ symbols_sm = ["PDUSessionEstablishmentRequest",
               "PDUSessionReleaseRequest",
               "PDUSessionReleaseComplete",
               "gsmStatus"]
+
+last_completed_fuzz_cycle = 0
+current_cycle_label = 0
+
+_builtin_print = builtins.print
+
+
+def _set_cycle_label(label: int) -> None:
+    global current_cycle_label
+    current_cycle_label = max(label, 0)
+    setFuzzCounter(current_cycle_label)
+
+
+def prepare_cycle() -> None:
+    """Prepare logging for the upcoming fuzzing cycle."""
+    _set_cycle_label(last_completed_fuzz_cycle + 1)
+
+
+def mark_cycle_started() -> None:
+    """Record that the active cycle has begun."""
+    global last_completed_fuzz_cycle
+    last_completed_fuzz_cycle = current_cycle_label
+
+
+def reset_cycle_counter() -> None:
+    """Reset the fuzzing counter after a full reset."""
+    global last_completed_fuzz_cycle
+    last_completed_fuzz_cycle = 0
+    _set_cycle_label(0)
+
+
+def print_with_counter(*args, **kwargs):  # type: ignore[override]
+    """Print helper that prefixes output with the fuzzing counter."""
+    _builtin_print(f"[{current_cycle_label}]", *args, **kwargs)
+
+
+print = print_with_counter  # type: ignore
+
+_set_cycle_label(0)
+
+
+def _non_negative_int(value: str) -> int:
+    try:
+        ivalue = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("iterations must be an integer") from exc
+    if ivalue < 0:
+        raise argparse.ArgumentTypeError("iterations must be a non-negative integer")
+    return ivalue
+
+
+def parse_arguments() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Core Fuzzer controller")
+    parser.add_argument(
+        "--iterations",
+        type=_non_negative_int,
+        default=0,
+        help="Number of fuzzing cycles to execute (0 for infinite)",
+    )
+    parser.add_argument(
+        "--symbols",
+        type=str,
+        default=None,
+        help="Comma-separated list of NAS message types to fuzz",
+    )
+    parser.add_argument(
+        "--seed-file",
+        type=Path,
+        default=None,
+        help="Path to a JSON/YAML file containing seed payloads",
+    )
+    parser.add_argument(
+        "--output-log-dir",
+        type=Path,
+        default=Path("./logs"),
+        help="Directory where component logs should be written",
+    )
+
+    args = parser.parse_args()
+
+    if args.symbols:
+        requested = [sym.strip() for sym in args.symbols.split(",") if sym.strip()]
+        if not requested:
+            parser.error("At least one NAS message type must be supplied when using --symbols")
+        invalid = sorted(set(requested) - set(ALL_SYMBOLS))
+        if invalid:
+            parser.error("Unknown NAS message types: " + ", ".join(invalid))
+        args.symbols = [sym for sym in ALL_SYMBOLS if sym in requested]
+    else:
+        args.symbols = ALL_SYMBOLS.copy()
+
+    if args.seed_file and not args.seed_file.exists():
+        parser.error(f"Seed file not found: {args.seed_file}")
+
+    args.output_log_dir = args.output_log_dir.expanduser()
+
+    return args
+
+
+def _load_seed_messages(seed_path: Path) -> Dict[str, List[str]]:
+    if seed_path.suffix.lower() in {".yaml", ".yml"}:
+        if yaml is None:
+            raise RuntimeError("PyYAML is required to parse YAML seed files")
+        with open(seed_path, "r", encoding="utf-8") as handle:
+            raw_data = yaml.safe_load(handle) or {}
+    else:
+        with open(seed_path, "r", encoding="utf-8") as handle:
+            raw_data = json.load(handle)
+
+    if not isinstance(raw_data, dict):
+        raise ValueError("Seed file must contain a mapping of NAS types to payload lists")
+
+    seeds: Dict[str, List[str]] = {}
+    for message_type, payloads in raw_data.items():
+        if message_type not in ALL_SYMBOLS:
+            raise ValueError(f"Unsupported NAS message type in seed file: {message_type}")
+        if isinstance(payloads, (str, bytes)) or not isinstance(payloads, Iterable):
+            raise ValueError(f"Payloads for {message_type} must be provided as a list")
+        normalized: List[str] = []
+        for payload in payloads:
+            if isinstance(payload, bytes):
+                normalized.append(payload.decode("utf-8", errors="ignore"))
+            else:
+                normalized.append(str(payload))
+        if normalized:
+            seeds[message_type] = normalized
+
+    return seeds
+
+
+def _insert_seed_messages(seed_messages: Dict[str, List[str]], states: Iterable) -> None:
+    if not seed_messages:
+        return
+
+    total = sum(len(payloads) for payloads in seed_messages.values())
+    print(f"Loading {total} seed payloads from file")
+    for state in states:
+        state_name = getattr(state, "name", str(state))
+        for message_type, payloads in seed_messages.items():
+            for payload in payloads:
+                store_new_message(
+                    state=state_name,
+                    send_type=message_type,
+                    ret_type="",
+                    if_crash=False,
+                    if_crash_sm=False,
+                    is_interesting=True,
+                    if_error=False,
+                    error_cause="",
+                    sht=0,
+                    secmod=0,
+                    base_msg=payload,
+                    new_msg=payload,
+                    ret_msg="",
+                    violation=False,
+                    mm_status="",
+                    byte_mut=False,
+                    fuzz_cycle=0,
+                )
 
 # send a message to UERANSIM
 def sendFuzzingMessage(msg):
@@ -223,6 +403,10 @@ def check_smf():
     return False
 
 if __name__ == '__main__':
+    args = parse_arguments()
+    setLogDirectory(args.output_log_dir)
+    symbols_enabled = args.symbols
+
     setOffset(0)
     # load FSM
     schedule = PowerSchedule()
@@ -249,12 +433,31 @@ if __name__ == '__main__':
         schedule.assignEnergy(fsm_sm.states)
     atexit.register(exit_handler, fsm, fsm_sm)
 
+    if args.seed_file:
+        try:
+            seed_messages = _load_seed_messages(args.seed_file)
+        except (RuntimeError, ValueError) as seed_error:
+            print(f"Failed to load seed file: {seed_error}")
+            raise SystemExit(1)
+        _insert_seed_messages(seed_messages, fsm.states)
+
+    prepare_cycle()
     reset(True)
+    prepare_cycle()
     full_reset = False
-    
-    while True:
+    remaining_iterations = args.iterations if args.iterations > 0 else None
+
+    for _ in itertools.count(1):
+        if remaining_iterations is not None and remaining_iterations <= 0:
+            print("Completed requested iterations, exiting...")
+            break
+
+        prepare_cycle()
+        cycle_executed = False
         try:
             reset(full_reset)
+            if current_cycle_label == 0:
+                prepare_cycle()
             print("IMSI_OFFSET:", getOffset())
             full_reset = False
             try:
@@ -300,40 +503,43 @@ if __name__ == '__main__':
                         resp_json = json.loads(msg)
                         print(resp_json)
                         store_new_message(state=state,
-                                        send_type=symbol,
-                                        ret_type="",
-                                        if_crash=False,
-                                        if_crash_sm=False,
-                                        is_interesting=True,
-                                        if_error=False,
-                                        error_cause="",
-                                        sht=resp_json.get("sht"),
-                                        secmod=resp_json.get("secmod"),
-                                        base_msg="",
-                                        new_msg=resp_json.get("new_msg"),
-                                        ret_msg="",
-                                        violation=False,
-                                        mm_status=resp_json.get("mm_status"),
-                                        byte_mut=False)
+                                          send_type=symbol,
+                                          ret_type="",
+                                          if_crash=False,
+                                          if_crash_sm=False,
+                                          is_interesting=True,
+                                          if_error=False,
+                                          error_cause="",
+                                          sht=resp_json.get("sht"),
+                                          secmod=resp_json.get("secmod"),
+                                          base_msg="",
+                                          new_msg=resp_json.get("new_msg"),
+                                          ret_msg="",
+                                          violation=False,
+                                          mm_status=resp_json.get("mm_status"),
+                                          byte_mut=False,
+                                          fuzz_cycle=current_cycle_label)
                 if check_seed_msg(state):
                     curr_state.is_init = True
                 else:
                     curr_state.is_init = False
                     continue
-                
-                fuzzing = True                                
+
+                fuzzing = True
                 while fuzzing:
+                    mark_cycle_started()
+                    cycle_executed = True
                     try:
                         connectGNB()
                     except socket.timeout:
                         print("Connection timeout, retrying...")
                         break
                     ins_msg = get_insteresting_msg(state)
-                    if_crash=False
-                    if_crash_sm=False
-                    is_interesting=False
-                    if_error=False
-                    error_cause=""
+                    if_crash = False
+                    if_crash_sm = False
+                    is_interesting = False
+                    if_error = False
+                    error_cause = ""
                     print(sendSymbol("incomingMessage_"+str(ins_msg.get("size"))))
                     if ins_msg.get("send_type") == "serviceRequest":
                         sendRRCRelease()
@@ -352,7 +558,10 @@ if __name__ == '__main__':
                     resp_json = json.loads(msg)
                     byte_mut = bool(resp_json.get("byte_mut"))
                     if not byte_mut:
-                        is_interesting = check_new_resopnse(state, ins_msg.get("send_type"), resp_json.get("ret_msg"), resp_json.get("mm_status"))
+                        is_interesting = check_new_resopnse(state,
+                                                            ins_msg.get("send_type"),
+                                                            resp_json.get("ret_msg"),
+                                                            resp_json.get("mm_status"))
                     if is_interesting:
                         curr_state.addEnergy(1)
                         msg_add_energy(ins_msg, 1)
@@ -381,10 +590,17 @@ if __name__ == '__main__':
                         print("no feedback from gNB")
                     if resp_json.get("ret_type") != "":
                         fuzzing = False
-                    violation = curr_state.oracle.query_message(ins_msg.get("send_type"), resp_json.get("ret_type"), resp_json.get("sht"), resp_json.get("secmod"))
+                    violation = curr_state.oracle.query_message(ins_msg.get("send_type"),
+                                                                resp_json.get("ret_type"),
+                                                                resp_json.get("sht"),
+                                                                resp_json.get("secmod"))
                     print("violation: ", violation)
                     if violation:
-                        violation = check_new_violation(state, ins_msg.get("send_type"), resp_json.get("ret_type"), resp_json.get("sht"), resp_json.get("secmod"))
+                        violation = check_new_violation(state,
+                                                         ins_msg.get("send_type"),
+                                                         resp_json.get("ret_type"),
+                                                         resp_json.get("sht"),
+                                                         resp_json.get("secmod"))
                     # send probe to SMF
                     if ins_msg.get("send_type") in symbols_sm:
                         print("send probe to SMF")
@@ -407,7 +623,8 @@ if __name__ == '__main__':
                                       ret_msg=resp_json.get("ret_msg"),
                                       violation=violation,
                                       mm_status=resp_json.get("mm_status"),
-                                      byte_mut=byte_mut)
+                                      byte_mut=byte_mut,
+                                      fuzz_cycle=current_cycle_label)
                     # learn new state if get a different return msg
                     if resp_json.get("ret_type") != "" and not fsm.search_new_transition(state, ins_msg.get("send_type"), resp_json.get("ret_type")) and not byte_mut:
                         print("get a different return msg")
@@ -492,3 +709,9 @@ if __name__ == '__main__':
             error_file.close()
             full_reset = True
             continue
+
+        if remaining_iterations is not None and cycle_executed:
+            remaining_iterations -= 1
+            if remaining_iterations <= 0:
+                print("Completed requested iterations, exiting...")
+                break
