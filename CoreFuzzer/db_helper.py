@@ -14,7 +14,7 @@ col = client["CoreFuzzer"][config["DB_NAME"]]
 col.create_index([("state"), ("new_msg"), ("sht"), ("secmod")], unique=True)
 col.create_index([("is_interesting"), ("mutate_count", 1)])
 
-def store_new_message(state: str, send_type: str, ret_type: str, if_crash: bool, if_crash_sm: bool, is_interesting: bool, if_error: bool, error_cause: str, sht: int, secmod: int, base_msg: str, new_msg: str, ret_msg: str, violation: bool, mm_status: str, byte_mut: bool):
+def store_new_message(state: str, send_type: str, ret_type: str, if_crash: bool, if_crash_sm: bool, is_interesting: bool, if_error: bool, error_cause: str, sht: int, secmod: int, base_msg: str, new_msg: str, ret_msg: str, violation: bool, mm_status: str, byte_mut: bool, fuzz_cycle: int = 0):
     try:
         col.insert_one({
             "timestamp": time.time(),
@@ -36,7 +36,8 @@ def store_new_message(state: str, send_type: str, ret_type: str, if_crash: bool,
             "mutate_count": 0,
             "violation": violation,
             "mm_status": mm_status,
-            "byte_mut": byte_mut
+            "byte_mut": byte_mut,
+            "fuzz_cycle": fuzz_cycle
             })
     except Exception as e:
         # print(e)
