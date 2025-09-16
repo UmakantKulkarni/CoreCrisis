@@ -1,0 +1,43 @@
+smf:
+    logger:
+      file: __LOG_DIR__/smf.log
+    sbi:
+      - addr: 127.0.0.4
+        port: 7777
+    pfcp:
+      - addr: 127.0.0.4
+    gtpc:
+      - addr: 127.0.0.4
+      # - addr: ::1
+    gtpu:
+      - addr: 127.0.0.4
+      # - addr: ::1
+    metrics:
+      addr: 127.0.0.4
+      port: 9090
+    subnet:
+      - addr: 10.45.0.1/16
+      # - addr: 2001:db8:cafe::1/48
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+      # - 2001:4860:4860::8888
+      # - 2001:4860:4860::8844
+    mtu: 1400
+    freeDiameter:
+      identity: smf.localdomain
+      realm: localdomain
+      listen_on: 127.0.0.4
+      no_fwd: true
+      load_extension:
+        - module: /corefuzzer_deps/open5gs/build/subprojects/freeDiameter/extensions/dbg_msg_dumps.fdx
+          conf: 0x8888
+        - module: /corefuzzer_deps/open5gs/build/subprojects/freeDiameter/extensions/dict_rfc5777.fdx
+        - module: /corefuzzer_deps/open5gs/build/subprojects/freeDiameter/extensions/dict_mip6i.fdx
+        - module: /corefuzzer_deps/open5gs/build/subprojects/freeDiameter/extensions/dict_nasreq.fdx
+        - module: /corefuzzer_deps/open5gs/build/subprojects/freeDiameter/extensions/dict_nas_mipv6.fdx
+        - module: /corefuzzer_deps/open5gs/build/subprojects/freeDiameter/extensions/dict_dcca.fdx
+        - module: /corefuzzer_deps/open5gs/build/subprojects/freeDiameter/extensions/dict_dcca_3gpp/dict_dcca_3gpp.fdx
+      connect:
+        - identity: pcrf.localdomain
+          addr: 127.0.0.9

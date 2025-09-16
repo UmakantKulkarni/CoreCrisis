@@ -35,6 +35,7 @@ RUN meson build --prefix=/ -Db_coverage=true && \
     ninja -C build
 RUN cd build && ninja install && cd .. && cp build/tests/app/5gc /usr/bin/
 COPY sample.yaml /corefuzzer_deps/open5gs/build/configs/sample.yaml
+COPY nf_configs /corefuzzer_deps/open5gs/build/configs/nf_configs
 
 # Install UERANSIM
 WORKDIR /corefuzzer_deps

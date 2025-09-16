@@ -32,6 +32,27 @@ _CORE_PROCESS: Optional[subprocess.Popen] = None
 _CORE_LOG_THREAD: Optional[threading.Thread] = None
 _CORE_LOG_STOP: Optional[threading.Event] = None
 
+# Mapping of network function name to the corresponding Open5GS binary.
+_NF_BINARIES: Dict[str, str] = {
+    "amf": "open5gs-amfd",
+    "ausf": "open5gs-ausfd",
+    "bsf": "open5gs-bsfd",
+    "nrf": "open5gs-nrfd",
+    "nssf": "open5gs-nssfd",
+    "pcf": "open5gs-pcfd",
+    "scp": "open5gs-scpd",
+    "smf": "open5gs-smfd",
+    "udm": "open5gs-udmd",
+    "udr": "open5gs-udrd",
+    "upf": "open5gs-upfd",
+}
+
+# Relative directory name that stores per-network-function configurations.
+_NF_CONFIG_SUBDIR = "nf_configs"
+
+# Track the individual network function processes started by the helper.
+_ACTIVE_NF_PROCESSES: Dict[str, subprocess.Popen] = {}
+
 # Match the Open5GS log prefix, e.g. "[amf]".
 _CORE_TAG_PATTERN = re.compile(r"\[(?P<tag>[A-Za-z0-9_.-]+)\]")
 
@@ -98,38 +119,50 @@ def _update_open5gs_logger_config(log_directory: Path) -> None:
         print("Warning: unable to locate Open5GS configuration path", file=sys.stderr)
         return
 
-    try:
-        template_text = _CONFIG_TEMPLATE_PATH.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        try:
-            template_text = config_path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            print(
-                "Warning: Open5GS configuration template is missing and no existing "
-                f"configuration found at {config_path}",
-                file=sys.stderr,
-            )
-            return
-
     log_directory = Path(log_directory)
     replacement = str(log_directory)
-    if _CONFIG_LOG_PLACEHOLDER not in template_text:
-        print(
-            f"Warning: log placeholder {_CONFIG_LOG_PLACEHOLDER} not found in template",
-            file=sys.stderr,
-        )
-        return
 
-    rendered = template_text.replace(_CONFIG_LOG_PLACEHOLDER, replacement)
-
-    try:
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        config_path.write_text(rendered, encoding="utf-8")
-    except OSError as exc:
-        print(
-            f"Warning: failed to update Open5GS logger configuration: {exc}",
-            file=sys.stderr,
+    template_pairs = [(_CONFIG_TEMPLATE_PATH, config_path)]
+    nf_template_root = _CONFIG_TEMPLATE_PATH.parent / _NF_CONFIG_SUBDIR
+    nf_target_root = config_path.parent / _NF_CONFIG_SUBDIR
+    for nf in _NF_BINARIES:
+        template_pairs.append(
+            (nf_template_root / f"{nf}.yaml", nf_target_root / f"{nf}.yaml")
         )
+
+    for template_path, target_path in template_pairs:
+        try:
+            template_text = template_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            try:
+                template_text = target_path.read_text(encoding="utf-8")
+            except FileNotFoundError:
+                print(
+                    "Warning: Open5GS configuration template is missing and no existing "
+                    f"configuration found at {target_path}",
+                    file=sys.stderr,
+                )
+                continue
+
+        if _CONFIG_LOG_PLACEHOLDER not in template_text:
+            print(
+                f"Warning: log placeholder {_CONFIG_LOG_PLACEHOLDER} not found in "
+                f"template {template_path}",
+                file=sys.stderr,
+            )
+            continue
+
+        rendered = template_text.replace(_CONFIG_LOG_PLACEHOLDER, replacement)
+
+        try:
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            target_path.write_text(rendered, encoding="utf-8")
+        except OSError as exc:
+            print(
+                "Warning: failed to update Open5GS logger configuration at "
+                f"{target_path}: {exc}",
+                file=sys.stderr,
+            )
 
 
 def _log_path(prefix: str, counter: Optional[int] = None) -> str:
@@ -205,21 +238,54 @@ def _start_core_logger(process: subprocess.Popen, counter: int) -> None:
 
 
 def startCore():
-    global _CORE_PROCESS
+    global _CORE_PROCESS, _ACTIVE_NF_PROCESSES
     _update_open5gs_logger_config(LOG_DIRECTORY)
     cfg_path = _resolve_open5gs_config_path()
     if cfg_path is None:
         raise RuntimeError("Unable to determine Open5GS configuration path")
-    process = subprocess.Popen(
-        args=["5gc", "-c", str(cfg_path)],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-        text=True,
-        bufsize=1,
-    )
-    _CORE_PROCESS = process
-    _start_core_logger(process, FUZZ_COUNTER)
+
+    config_root = cfg_path.parent
+    nf_config_root = config_root / _NF_CONFIG_SUBDIR
+    if not nf_config_root.exists():
+        raise RuntimeError(
+            f"Unable to locate per-network-function configuration directory at {nf_config_root}"
+        )
+
+    LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    processes: Dict[str, subprocess.Popen] = {}
+    try:
+        for nf_name, binary in _NF_BINARIES.items():
+            nf_config_path = nf_config_root / f"{nf_name}.yaml"
+            if not nf_config_path.exists():
+                raise RuntimeError(
+                    f"Missing configuration file for {nf_name} at {nf_config_path}"
+                )
+            log_path = (LOG_DIRECTORY / f"{nf_name}.log").resolve()
+            process = subprocess.Popen(
+                args=[binary, "-c", str(nf_config_path), "-l", str(log_path)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            processes[nf_name] = process
+    except Exception:
+        for proc in processes.values():
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        for proc in processes.values():
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+        raise
+
+    _CORE_PROCESS = None
+    _ACTIVE_NF_PROCESSES = processes
 
 def startUE():
     with open(_log_path("ue"), "w") as out:
@@ -253,7 +319,7 @@ def startGNB():
                          start_new_session=True)
 
 def killCore():
-    global _CORE_PROCESS, _CORE_LOG_THREAD, _CORE_LOG_STOP
+    global _CORE_PROCESS, _CORE_LOG_THREAD, _CORE_LOG_STOP, _ACTIVE_NF_PROCESSES
     if _CORE_LOG_STOP:
         _CORE_LOG_STOP.set()
     if _CORE_PROCESS and _CORE_PROCESS.poll() is None:
@@ -261,6 +327,12 @@ def killCore():
             _CORE_PROCESS.terminate()
         except Exception:
             pass
+    for proc in list(_ACTIVE_NF_PROCESSES.values()):
+        if proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
     subprocess.run(["pkill", "-2", "-f", "5gc"],
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     proc = subprocess.run(["ps", "-ef"], encoding='utf-8', stdout=subprocess.PIPE)
@@ -278,11 +350,20 @@ def killCore():
                 _CORE_PROCESS.kill()
             except Exception:
                 pass
+    for proc in list(_ACTIVE_NF_PROCESSES.values()):
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            try:
+                proc.kill()
+            except Exception:
+                pass
     if _CORE_LOG_THREAD:
         _CORE_LOG_THREAD.join(timeout=5)
     _CORE_PROCESS = None
     _CORE_LOG_THREAD = None
     _CORE_LOG_STOP = None
+    _ACTIVE_NF_PROCESSES = {}
 
 def killUE():
     subprocess.run(["pkill", "-2", "-f", "nr-ue"], 
