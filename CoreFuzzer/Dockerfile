@@ -6,7 +6,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # Install dependencies
 RUN apt-get update && apt-get upgrade -y && \
     apt-get install -y --no-install-suggests --no-install-recommends \
-    gnupg curl ca-certificates systemctl \
+    gnupg curl ca-certificates systemctl vim \
     python3-pip python3-setuptools python3-wheel \
     ninja-build build-essential flex bison \
     git cmake iproute2 \
