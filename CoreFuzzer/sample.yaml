@@ -1,6 +1,8 @@
 db_uri: mongodb://localhost/open5gs
 
 logger:
+  # __LOG_DIR__ placeholders are replaced at runtime with the active fuzzing
+  # log directory.
 
 sbi:
     server:
@@ -34,6 +36,8 @@ parameter:
 #    use_mongodb_change_stream: true
 
 mme:
+    logger:
+      file: __LOG_DIR__/mme.log
     freeDiameter:
       identity: mme.localdomain
       realm: localdomain
@@ -78,12 +82,16 @@ mme:
         full: Open5GS
 
 sgwc:
+    logger:
+      file: __LOG_DIR__/sgwc.log
     gtpc:
       - addr: 127.0.0.3
     pfcp:
       - addr: 127.0.0.3
 
 smf:
+    logger:
+      file: __LOG_DIR__/smf.log
     sbi:
       - addr: 127.0.0.4
         port: 7777
@@ -126,6 +134,8 @@ smf:
           addr: 127.0.0.9
 
 amf:
+    logger:
+      file: __LOG_DIR__/amf.log
     sbi:
       - addr: 127.0.0.5
         port: 7777
@@ -160,12 +170,16 @@ amf:
     amf_name: open5gs-amf0
 
 sgwu:
+    logger:
+      file: __LOG_DIR__/sgwu.log
     pfcp:
       - addr: 127.0.0.6
     gtpu:
       - addr: 127.0.0.6
 
 upf:
+    logger:
+      file: __LOG_DIR__/upf.log
     pfcp:
       - addr: 127.0.0.7
     gtpu:
@@ -178,6 +192,8 @@ upf:
         port: 9090
 
 hss:
+    logger:
+      file: __LOG_DIR__/hss.log
     freeDiameter:
       identity: hss.localdomain
       realm: localdomain
@@ -196,6 +212,8 @@ hss:
         - identity: mme.localdomain
           addr: 127.0.0.2
 pcrf:
+    logger:
+      file: __LOG_DIR__/pcrf.log
     freeDiameter:
       identity: pcrf.localdomain
       realm: localdomain
@@ -215,6 +233,8 @@ pcrf:
           addr: 127.0.0.4
 
 nrf:
+    logger:
+      file: __LOG_DIR__/nrf.log
     sbi:
       - addr:
         - 127.0.0.10
@@ -222,16 +242,22 @@ nrf:
         port: 7777
 
 scp:
+    logger:
+      file: __LOG_DIR__/scp.log
     sbi:
       - addr: 127.0.1.10
         port: 7777
 
 ausf:
+    logger:
+      file: __LOG_DIR__/ausf.log
     sbi:
       - addr: 127.0.0.11
         port: 7777
 
 udm:
+    logger:
+      file: __LOG_DIR__/udm.log
     hnet:
       - id: 1
         scheme: 1
@@ -244,6 +270,8 @@ udm:
         port: 7777
 
 pcf:
+    logger:
+      file: __LOG_DIR__/pcf.log
     sbi:
       - addr: 127.0.0.13
         port: 7777
@@ -252,6 +280,8 @@ pcf:
         port: 9090
 
 nssf:
+    logger:
+      file: __LOG_DIR__/nssf.log
     sbi:
       - addr: 127.0.0.14
         port: 7777
@@ -261,11 +291,15 @@ nssf:
         s_nssai:
           sst: 1
 bsf:
+    logger:
+      file: __LOG_DIR__/bsf.log
     sbi:
       - addr: 127.0.0.15
         port: 7777
 
 udr:
+    logger:
+      file: __LOG_DIR__/udr.log
     sbi:
       - addr: 127.0.0.20
         port: 7777

@@ -2,16 +2,30 @@ from dotenv import dotenv_values
 import os
 import re
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
-from typing import Dict, Optional, TextIO
+from typing import Dict, List, Optional, TextIO
 
 # Active fuzzing iteration counter propagated from the fuzzer.
 FUZZ_COUNTER = 0
 
 # Base directory for all generated logs.
 LOG_DIRECTORY = Path("./logs")
+
+# Location of the Open5GS configuration template that includes logger placeholders.
+_CONFIG_TEMPLATE_PATH = Path(__file__).resolve().parent / "sample.yaml"
+
+# Placeholder token within the template that is replaced with the active log directory.
+_CONFIG_LOG_PLACEHOLDER = "__LOG_DIR__"
+
+# Default Open5GS install root inside the container. Used if the environment file is
+# missing or does not define OPEN5GS_PATH.
+_DEFAULT_OPEN5GS_ROOT = Path("/corefuzzer_deps/open5gs")
+
+# Relative path from the Open5GS root to the sample configuration used by the core.
+_OPEN5GS_CONFIG_RELATIVE = Path("build") / "configs" / "sample.yaml"
 
 # Internal tracking of the Open5GS core logging thread.
 _CORE_PROCESS: Optional[subprocess.Popen] = None
@@ -20,6 +34,47 @@ _CORE_LOG_STOP: Optional[threading.Event] = None
 
 # Match the Open5GS log prefix, e.g. "[amf]".
 _CORE_TAG_PATTERN = re.compile(r"\[(?P<tag>[A-Za-z0-9_.-]+)\]")
+
+
+def _candidate_open5gs_roots() -> List[Path]:
+    """Return possible Open5GS installation roots ordered by priority."""
+    roots: List[Path] = []
+    env_root = None
+    try:
+        env_root = config.get("OPEN5GS_PATH")  # type: ignore[name-defined]
+    except NameError:
+        env_root = None
+
+    if env_root:
+        roots.append(Path(env_root).expanduser())
+    roots.append(_DEFAULT_OPEN5GS_ROOT)
+
+    unique_roots: List[Path] = []
+    seen: set[str] = set()
+    for root in roots:
+        resolved = root.expanduser()
+        key = str(resolved)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_roots.append(resolved)
+    return unique_roots
+
+
+def _resolve_open5gs_config_path() -> Optional[Path]:
+    """Locate the Open5GS sample configuration file inside the container."""
+    roots = _candidate_open5gs_roots()
+    if not roots:
+        return None
+
+    for root in roots:
+        candidate = root / _OPEN5GS_CONFIG_RELATIVE
+        if candidate.exists():
+            return candidate
+
+    # Fall back to the highest priority candidate even if it does not exist yet so
+    # callers can create it on demand.
+    return roots[0] / _OPEN5GS_CONFIG_RELATIVE
 
 
 def setFuzzCounter(counter: int):
@@ -31,8 +86,50 @@ def setFuzzCounter(counter: int):
 def setLogDirectory(directory: Path) -> None:
     """Configure the directory used for all log files."""
     global LOG_DIRECTORY
-    LOG_DIRECTORY = Path(directory)
+    LOG_DIRECTORY = Path(directory).expanduser().resolve()
     LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    _update_open5gs_logger_config(LOG_DIRECTORY)
+
+
+def _update_open5gs_logger_config(log_directory: Path) -> None:
+    """Render the Open5GS configuration with per-component log file paths."""
+    config_path = _resolve_open5gs_config_path()
+    if config_path is None:
+        print("Warning: unable to locate Open5GS configuration path", file=sys.stderr)
+        return
+
+    try:
+        template_text = _CONFIG_TEMPLATE_PATH.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        try:
+            template_text = config_path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            print(
+                "Warning: Open5GS configuration template is missing and no existing "
+                f"configuration found at {config_path}",
+                file=sys.stderr,
+            )
+            return
+
+    log_directory = Path(log_directory)
+    replacement = str(log_directory)
+    if _CONFIG_LOG_PLACEHOLDER not in template_text:
+        print(
+            f"Warning: log placeholder {_CONFIG_LOG_PLACEHOLDER} not found in template",
+            file=sys.stderr,
+        )
+        return
+
+    rendered = template_text.replace(_CONFIG_LOG_PLACEHOLDER, replacement)
+
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(rendered, encoding="utf-8")
+    except OSError as exc:
+        print(
+            f"Warning: failed to update Open5GS logger configuration: {exc}",
+            file=sys.stderr,
+        )
 
 
 def _log_path(prefix: str, counter: Optional[int] = None) -> str:
@@ -109,9 +206,12 @@ def _start_core_logger(process: subprocess.Popen, counter: int) -> None:
 
 def startCore():
     global _CORE_PROCESS
-    cfg = os.path.join(config["OPEN5GS_PATH"], "build", "configs", "sample.yaml")
+    _update_open5gs_logger_config(LOG_DIRECTORY)
+    cfg_path = _resolve_open5gs_config_path()
+    if cfg_path is None:
+        raise RuntimeError("Unable to determine Open5GS configuration path")
     process = subprocess.Popen(
-        args=["5gc", "-c", cfg],
+        args=["5gc", "-c", str(cfg_path)],
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         start_new_session=True,
