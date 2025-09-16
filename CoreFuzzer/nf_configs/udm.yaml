@@ -1,0 +1,13 @@
+udm:
+    logger:
+      file: __LOG_DIR__/udm.log
+    hnet:
+      - id: 1
+        scheme: 1
+        key: /corefuzzer_deps/open5gs/build/configs/open5gs/hnet/curve25519-1.key
+      - id: 2
+        scheme: 2
+        key: /corefuzzer_deps/open5gs/build/configs/open5gs/hnet/secp256r1-2.key
+    sbi:
+      - addr: 127.0.0.12
+        port: 7777

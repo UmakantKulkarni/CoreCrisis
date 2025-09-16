@@ -1,0 +1,13 @@
+upf:
+    logger:
+      file: __LOG_DIR__/upf.log
+    pfcp:
+      - addr: 127.0.0.7
+    gtpu:
+      - addr: 127.0.0.7
+    subnet:
+      - addr: 10.45.0.1/16
+      # - addr: 2001:db8:cafe::1/48
+    metrics:
+      - addr: 127.0.0.7
+        port: 9090

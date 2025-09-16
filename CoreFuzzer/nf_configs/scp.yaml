@@ -1,0 +1,6 @@
+scp:
+    logger:
+      file: __LOG_DIR__/scp.log
+    sbi:
+      - addr: 127.0.1.10
+        port: 7777

@@ -1,0 +1,6 @@
+bsf:
+    logger:
+      file: __LOG_DIR__/bsf.log
+    sbi:
+      - addr: 127.0.0.15
+        port: 7777

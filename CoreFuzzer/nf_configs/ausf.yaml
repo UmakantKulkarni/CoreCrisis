@@ -1,0 +1,6 @@
+ausf:
+    logger:
+      file: __LOG_DIR__/ausf.log
+    sbi:
+      - addr: 127.0.0.11
+        port: 7777
