@@ -1,3 +1,17 @@
+db_uri: mongodb://localhost/open5gs
+
+sbi:
+    server:
+      no_tls: true
+      cacert: /corefuzzer_deps/open5gs/build/configs/open5gs/tls/ca.crt
+      key: /corefuzzer_deps/open5gs/build/configs/open5gs/tls/testserver.key
+      cert: /corefuzzer_deps/open5gs/build/configs/open5gs/tls/testserver.crt
+    client:
+      no_tls: true
+      cacert: /corefuzzer_deps/open5gs/build/configs/open5gs/tls/ca.crt
+      key: /corefuzzer_deps/open5gs/build/configs/open5gs/tls/testclient.key
+      cert: /corefuzzer_deps/open5gs/build/configs/open5gs/tls/testclient.crt
+
 smf:
     logger:
       file: __LOG_DIR__/smf.log
