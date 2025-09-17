@@ -20,12 +20,6 @@ FUZZ_COUNTER = 0
 # Base directory for all generated logs.
 LOG_DIRECTORY = Path("./logs")
 
-# Location of the Open5GS configuration template that includes logger placeholders.
-_CONFIG_TEMPLATE_PATH = Path(__file__).resolve().parent / "sample.yaml"
-
-# Placeholder token within the template that is replaced with the active log directory.
-_CONFIG_LOG_PLACEHOLDER = "__LOG_DIR__"
-
 # Default Open5GS install root inside the container. Used if the environment file is
 # missing or does not define OPEN5GS_PATH.
 _DEFAULT_OPEN5GS_ROOT = Path("/corefuzzer_deps/open5gs")
@@ -52,9 +46,6 @@ _NF_BINARIES: Dict[str, str] = {
     "udr": "open5gs-udrd",
     "upf": "open5gs-upfd",
 }
-
-# Relative directory name that stores per-network-function configurations.
-_NF_CONFIG_SUBDIR = "nf_configs"
 
 # Network functions that must signal readiness before starting the remaining
 # components.
@@ -93,22 +84,6 @@ def _candidate_open5gs_roots() -> List[Path]:
     return unique_roots
 
 
-def _resolve_open5gs_config_path() -> Optional[Path]:
-    """Locate the Open5GS sample configuration file inside the container."""
-    roots = _candidate_open5gs_roots()
-    if not roots:
-        return None
-
-    for root in roots:
-        candidate = root / _OPEN5GS_CONFIG_RELATIVE
-        if candidate.exists():
-            return candidate
-
-    # Fall back to the highest priority candidate even if it does not exist yet so
-    # callers can create it on demand.
-    return roots[0] / _OPEN5GS_CONFIG_RELATIVE
-
-
 def setFuzzCounter(counter: int):
     """Propagate the current fuzzing iteration counter to the helpers."""
     global FUZZ_COUNTER
@@ -120,61 +95,6 @@ def setLogDirectory(directory: Path) -> None:
     global LOG_DIRECTORY
     LOG_DIRECTORY = Path(directory).expanduser().resolve()
     LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
-    _update_open5gs_logger_config(LOG_DIRECTORY)
-
-
-def _update_open5gs_logger_config(log_directory: Path) -> None:
-    """Render the Open5GS configuration with per-component log file paths."""
-    config_path = _resolve_open5gs_config_path()
-    if config_path is None:
-        print("Warning: unable to locate Open5GS configuration path", file=sys.stderr)
-        return
-
-    log_directory = Path(log_directory)
-    replacement = str(log_directory)
-
-    template_pairs = [(_CONFIG_TEMPLATE_PATH, config_path)]
-    nf_template_root = _CONFIG_TEMPLATE_PATH.parent / _NF_CONFIG_SUBDIR
-    nf_target_root = config_path.parent / _NF_CONFIG_SUBDIR
-    for nf in _NF_BINARIES:
-        template_pairs.append(
-            (nf_template_root / f"{nf}.yaml", nf_target_root / f"{nf}.yaml")
-        )
-
-    for template_path, target_path in template_pairs:
-        try:
-            template_text = template_path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            try:
-                template_text = target_path.read_text(encoding="utf-8")
-            except FileNotFoundError:
-                print(
-                    "Warning: Open5GS configuration template is missing and no existing "
-                    f"configuration found at {target_path}",
-                    file=sys.stderr,
-                )
-                continue
-
-        if _CONFIG_LOG_PLACEHOLDER not in template_text:
-            print(
-                f"Warning: log placeholder {_CONFIG_LOG_PLACEHOLDER} not found in "
-                f"template {template_path}",
-                file=sys.stderr,
-            )
-            continue
-
-        rendered = template_text.replace(_CONFIG_LOG_PLACEHOLDER, replacement)
-
-        try:
-            target_path.parent.mkdir(parents=True, exist_ok=True)
-            target_path.write_text(rendered, encoding="utf-8")
-        except OSError as exc:
-            print(
-                "Warning: failed to update Open5GS logger configuration at "
-                f"{target_path}: {exc}",
-                file=sys.stderr,
-            )
-
 
 def _log_path(prefix: str, counter: Optional[int] = None) -> str:
     """Return the log path with the fuzz counter embedded."""
@@ -231,159 +151,9 @@ def _consume_core_logs(process: subprocess.Popen, counter: int, stop_event: thre
                 pass
 
 
-def _start_core_logger(process: subprocess.Popen, counter: int) -> None:
-    """Spawn the background thread that splits Open5GS logs per NF."""
-    global _CORE_LOG_THREAD, _CORE_LOG_STOP
-    if _CORE_LOG_THREAD and _CORE_LOG_THREAD.is_alive():
-        if _CORE_LOG_STOP:
-            _CORE_LOG_STOP.set()
-        _CORE_LOG_THREAD.join(timeout=5)
-    stop_event = threading.Event()
-    _CORE_LOG_STOP = stop_event
-    _CORE_LOG_THREAD = threading.Thread(
-        target=_consume_core_logs,
-        args=(process, counter, stop_event),
-        daemon=True,
-    )
-    _CORE_LOG_THREAD.start()
-
-
-def _load_nf_config(config_path: Path) -> Optional[Dict[str, object]]:
-    """Load the YAML configuration for an individual network function."""
-    if yaml is None:
-        return None
-    try:
-        with config_path.open("r", encoding="utf-8") as handle:
-            data = yaml.safe_load(handle)  # type: ignore[attr-defined]
-    except FileNotFoundError:
-        return None
-    except Exception as exc:
-        print(
-            f"Warning: failed to parse configuration for {config_path}: {exc}",
-            file=sys.stderr,
-        )
-        return None
-    if not isinstance(data, dict):
-        return None
-    return data
-
-
-def _extract_sbi_endpoints(
-    nf_name: str, config_path: Path
-) -> List[Tuple[str, int]]:
-    """Return the list of SBI endpoints configured for the NF."""
-    data = _load_nf_config(config_path)
-    if not data:
-        return []
-
-    nf_settings = data.get(nf_name)
-    if not isinstance(nf_settings, dict):
-        return []
-
-    sbi_config = nf_settings.get("sbi")
-    endpoints: List[Tuple[str, int]] = []
-    if isinstance(sbi_config, list):
-        for entry in sbi_config:
-            if not isinstance(entry, dict):
-                continue
-            addresses = entry.get("addr")
-            port_value = entry.get("port")
-            try:
-                port = int(port_value)
-            except (TypeError, ValueError):
-                continue
-
-            addr_iter: List[str]
-            if isinstance(addresses, list):
-                addr_iter = [addr for addr in addresses if isinstance(addr, str)]
-            elif isinstance(addresses, str):
-                addr_iter = [addresses]
-            else:
-                addr_iter = []
-
-            for address in addr_iter:
-                if address in {"0.0.0.0", "::", "::0"}:
-                    # Skip wildcard addresses that cannot be probed directly.
-                    continue
-                endpoints.append((address, port))
-
-    return endpoints
-
-
-def _probe_tcp_endpoint(address: str, port: int, timeout: float = 1.0) -> bool:
-    """Return True if a TCP connection can be established to the endpoint."""
-    try:
-        address_info = socket.getaddrinfo(
-            address, port, type=socket.SOCK_STREAM
-        )
-    except socket.gaierror:
-        return False
-
-    for family, socktype, proto, _, sockaddr in address_info:
-        sock = socket.socket(family, socktype, proto)
-        try:
-            sock.settimeout(timeout)
-            sock.connect(sockaddr)
-        except OSError:
-            continue
-        else:
-            return True
-        finally:
-            try:
-                sock.close()
-            except OSError:
-                pass
-    return False
-
-
-def _wait_for_nf_startup(
-    nf_name: str,
-    process: subprocess.Popen,
-    config_path: Path,
-    timeout: float = 30.0,
-) -> None:
-    """Block until the NF becomes ready to accept SBI connections."""
-    endpoints = _extract_sbi_endpoints(nf_name, config_path)
-    if not endpoints:
-        # Fall back to a short delay when readiness cannot be determined.
-        fallback_deadline = time.monotonic() + min(5.0, timeout)
-        while time.monotonic() < fallback_deadline:
-            if process.poll() is not None:
-                raise RuntimeError(
-                    f"{nf_name} exited prematurely with code {process.returncode}"
-                )
-            time.sleep(0.2)
-        return
-
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if process.poll() is not None:
-            raise RuntimeError(
-                f"{nf_name} exited prematurely with code {process.returncode}"
-            )
-        for address, port in endpoints:
-            if _probe_tcp_endpoint(address, port):
-                return
-        time.sleep(0.5)
-
-    raise TimeoutError(
-        f"Timed out waiting for {nf_name} to accept connections on {endpoints}"
-    )
-
-
 def startCore():
     global _CORE_PROCESS, _ACTIVE_NF_PROCESSES
-    _update_open5gs_logger_config(LOG_DIRECTORY)
-    cfg_path = _resolve_open5gs_config_path()
-    if cfg_path is None:
-        raise RuntimeError("Unable to determine Open5GS configuration path")
-
-    config_root = cfg_path.parent
-    nf_config_root = config_root / _NF_CONFIG_SUBDIR
-    if not nf_config_root.exists():
-        raise RuntimeError(
-            f"Unable to locate per-network-function configuration directory at {nf_config_root}"
-        )
+    cfg_file = os.path.join(config["OPEN5GS_PATH"], "build", "configs", "sample.yaml")
 
     LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
 
@@ -397,21 +167,16 @@ def startCore():
     try:
         for nf_name in launch_order:
             binary = _NF_BINARIES[nf_name]
-            nf_config_path = nf_config_root / f"{nf_name}.yaml"
-            if not nf_config_path.exists():
-                raise RuntimeError(
-                    f"Missing configuration file for {nf_name} at {nf_config_path}"
-                )
             log_path = (LOG_DIRECTORY / f"{nf_name}.log").resolve()
             process = subprocess.Popen(
-                args=[binary, "-c", str(nf_config_path), "-l", str(log_path)],
+                args=[binary, "-c", str(cfg_file), "-l", str(log_path)],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
             )
             processes[nf_name] = process
             if nf_name in _NF_WAIT_FOR_STARTUP:
-                _wait_for_nf_startup(nf_name, process, nf_config_path)
+                time.sleep(5)
     except Exception:
         for proc in processes.values():
             try:
