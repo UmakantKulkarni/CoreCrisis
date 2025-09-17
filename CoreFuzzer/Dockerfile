@@ -9,7 +9,7 @@ RUN apt-get update && apt-get upgrade -y && \
     gnupg curl ca-certificates systemctl vim \
     python3-pip python3-setuptools python3-wheel \
     ninja-build build-essential flex bison \
-    git cmake iproute2 \
+    git cmake iproute2 net-tools \
     libsctp-dev libgnutls28-dev libgcrypt-dev libssl-dev \
     libidn11-dev libmongoc-dev libbson-dev libyaml-dev \
     libnghttp2-dev libmicrohttpd-dev libcurl4-gnutls-dev libnghttp2-dev \
