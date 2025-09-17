@@ -1,12 +1,18 @@
 from dotenv import dotenv_values
 import os
 import re
+import socket
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
-from typing import Dict, List, Optional, TextIO
+from typing import Dict, List, Optional, TextIO, Tuple
+
+try:
+    import yaml  # type: ignore
+except ImportError:  # pragma: no cover - PyYAML is expected to be available
+    yaml = None  # type: ignore
 
 # Active fuzzing iteration counter propagated from the fuzzer.
 FUZZ_COUNTER = 0
@@ -49,6 +55,11 @@ _NF_BINARIES: Dict[str, str] = {
 
 # Relative directory name that stores per-network-function configurations.
 _NF_CONFIG_SUBDIR = "nf_configs"
+
+# Network functions that must signal readiness before starting the remaining
+# components.
+_NF_STARTUP_PRIORITY = ("nrf", "scp")
+_NF_WAIT_FOR_STARTUP = set(_NF_STARTUP_PRIORITY)
 
 # Track the individual network function processes started by the helper.
 _ACTIVE_NF_PROCESSES: Dict[str, subprocess.Popen] = {}
@@ -237,6 +248,129 @@ def _start_core_logger(process: subprocess.Popen, counter: int) -> None:
     _CORE_LOG_THREAD.start()
 
 
+def _load_nf_config(config_path: Path) -> Optional[Dict[str, object]]:
+    """Load the YAML configuration for an individual network function."""
+    if yaml is None:
+        return None
+    try:
+        with config_path.open("r", encoding="utf-8") as handle:
+            data = yaml.safe_load(handle)  # type: ignore[attr-defined]
+    except FileNotFoundError:
+        return None
+    except Exception as exc:
+        print(
+            f"Warning: failed to parse configuration for {config_path}: {exc}",
+            file=sys.stderr,
+        )
+        return None
+    if not isinstance(data, dict):
+        return None
+    return data
+
+
+def _extract_sbi_endpoints(
+    nf_name: str, config_path: Path
+) -> List[Tuple[str, int]]:
+    """Return the list of SBI endpoints configured for the NF."""
+    data = _load_nf_config(config_path)
+    if not data:
+        return []
+
+    nf_settings = data.get(nf_name)
+    if not isinstance(nf_settings, dict):
+        return []
+
+    sbi_config = nf_settings.get("sbi")
+    endpoints: List[Tuple[str, int]] = []
+    if isinstance(sbi_config, list):
+        for entry in sbi_config:
+            if not isinstance(entry, dict):
+                continue
+            addresses = entry.get("addr")
+            port_value = entry.get("port")
+            try:
+                port = int(port_value)
+            except (TypeError, ValueError):
+                continue
+
+            addr_iter: List[str]
+            if isinstance(addresses, list):
+                addr_iter = [addr for addr in addresses if isinstance(addr, str)]
+            elif isinstance(addresses, str):
+                addr_iter = [addresses]
+            else:
+                addr_iter = []
+
+            for address in addr_iter:
+                if address in {"0.0.0.0", "::", "::0"}:
+                    # Skip wildcard addresses that cannot be probed directly.
+                    continue
+                endpoints.append((address, port))
+
+    return endpoints
+
+
+def _probe_tcp_endpoint(address: str, port: int, timeout: float = 1.0) -> bool:
+    """Return True if a TCP connection can be established to the endpoint."""
+    try:
+        address_info = socket.getaddrinfo(
+            address, port, type=socket.SOCK_STREAM
+        )
+    except socket.gaierror:
+        return False
+
+    for family, socktype, proto, _, sockaddr in address_info:
+        sock = socket.socket(family, socktype, proto)
+        try:
+            sock.settimeout(timeout)
+            sock.connect(sockaddr)
+        except OSError:
+            continue
+        else:
+            return True
+        finally:
+            try:
+                sock.close()
+            except OSError:
+                pass
+    return False
+
+
+def _wait_for_nf_startup(
+    nf_name: str,
+    process: subprocess.Popen,
+    config_path: Path,
+    timeout: float = 30.0,
+) -> None:
+    """Block until the NF becomes ready to accept SBI connections."""
+    endpoints = _extract_sbi_endpoints(nf_name, config_path)
+    if not endpoints:
+        # Fall back to a short delay when readiness cannot be determined.
+        fallback_deadline = time.monotonic() + min(5.0, timeout)
+        while time.monotonic() < fallback_deadline:
+            if process.poll() is not None:
+                raise RuntimeError(
+                    f"{nf_name} exited prematurely with code {process.returncode}"
+                )
+            time.sleep(0.2)
+        return
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            raise RuntimeError(
+                f"{nf_name} exited prematurely with code {process.returncode}"
+            )
+        for address, port in endpoints:
+            if _probe_tcp_endpoint(address, port):
+                return
+        time.sleep(0.5)
+
+    raise TimeoutError(
+        f"Timed out waiting for {nf_name} to accept connections on {endpoints}"
+    )
+
+
 def startCore():
     global _CORE_PROCESS, _ACTIVE_NF_PROCESSES
     _update_open5gs_logger_config(LOG_DIRECTORY)
@@ -252,9 +386,17 @@ def startCore():
         )
 
     LOG_DIRECTORY.mkdir(parents=True, exist_ok=True)
+
+    prioritized_nfs = [nf for nf in _NF_STARTUP_PRIORITY if nf in _NF_BINARIES]
+    remaining_nfs = [
+        nf_name for nf_name in _NF_BINARIES if nf_name not in _NF_WAIT_FOR_STARTUP
+    ]
+    launch_order = prioritized_nfs + remaining_nfs
+
     processes: Dict[str, subprocess.Popen] = {}
     try:
-        for nf_name, binary in _NF_BINARIES.items():
+        for nf_name in launch_order:
+            binary = _NF_BINARIES[nf_name]
             nf_config_path = nf_config_root / f"{nf_name}.yaml"
             if not nf_config_path.exists():
                 raise RuntimeError(
@@ -268,6 +410,8 @@ def startCore():
                 start_new_session=True,
             )
             processes[nf_name] = process
+            if nf_name in _NF_WAIT_FOR_STARTUP:
+                _wait_for_nf_startup(nf_name, process, nf_config_path)
     except Exception:
         for proc in processes.values():
             try:
